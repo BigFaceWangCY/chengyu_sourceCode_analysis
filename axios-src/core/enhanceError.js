@@ -1,14 +1,7 @@
 'use strict'
 
 /**
- * Update an Error with the specified config, error code, and response.
- *
- * @param {Error} error The error to update.
- * @param {Object} config The config.
- * @param {string} [code] The error code (for example, 'ECONNABORTED').
- * @param {Object} [request] The request.
- * @param {Object} [response] The response.
- * @returns {Error} The error.
+ * 导出一个方法，这个方法主要就是把传入的错误信息整个到一个错误对象中，用于格式化显示
  */
 module.exports = function enhanceError (error, config, code, request, response) {
   error.config = config

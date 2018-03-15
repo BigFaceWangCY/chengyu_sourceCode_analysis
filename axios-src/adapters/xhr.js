@@ -56,20 +56,16 @@ module.exports = function xhrAdapter (config) {
         return
       }
 
-      // The request errored out and we didn't get a response, this will be
-      // handled by onerror instead
-      // With one exception: request that using file: protocol, most browsers
-      // will return status as 0 even though it's a successful request
+      // 如果请求状态为 0 且响应 url 存在且是一个 file 服务，那么返回，不执行操作
       if (request.status === 0 && !(request.responseURL && request.responseURL.indexOf('file:') === 0)) {
         return
       }
 
-      // Prepare the response
+      // 配置响应事件事件参数，并设置到一个 Promise 对象中
       var responseHeaders = 'getAllResponseHeaders' in request ? parseHeaders(request.getAllResponseHeaders()) : null
       var responseData = !config.responseType || config.responseType === 'text' ? request.responseText : request.response
       var response = {
         data: responseData,
-        // IE sends 1223 instead of 204 (https://github.com/axios/axios/issues/201)
         status: request.status === 1223 ? 204 : request.status,
         statusText: request.status === 1223 ? 'No Content' : request.statusText,
         headers: responseHeaders,
@@ -116,14 +112,16 @@ module.exports = function xhrAdapter (config) {
       }
     }
 
-    // Add headers to the request
+    // 如果 request 中有 setRequestHeader 方法那么就设置请求头的内容
     if ('setRequestHeader' in request) {
+      // 遍历配置的请求头内容，调用回调函数
       utils.forEach(requestHeaders, function setRequestHeader (val, key) {
+        // 如果没有配置 requestData 那么清除请求头中的 content-type 项
         if (typeof requestData === 'undefined' && key.toLowerCase() === 'content-type') {
           // Remove Content-Type if data is undefined
           delete requestHeaders[key]
         } else {
-          // Otherwise add header to the request
+          // 设置请求头部信息
           request.setRequestHeader(key, val)
         }
       })
@@ -134,48 +132,49 @@ module.exports = function xhrAdapter (config) {
       request.withCredentials = true
     }
 
-    // Add responseType to request if needed
+    // 如果配置了 responseType,那么将其设置在请求头部中
     if (config.responseType) {
       try {
         request.responseType = config.responseType
       } catch (e) {
-        // Expected DOMException thrown by browsers not compatible XMLHttpRequest Level 2.
-        // But, this can be suppressed for 'json' type as it can be parsed by default 'transformResponse' function.
         if (config.responseType !== 'json') {
           throw e
         }
       }
     }
 
-    // Handle progress if needed
+    // 如果配置了下载事件监听回调，那么添加事件监听
     if (typeof config.onDownloadProgress === 'function') {
       request.addEventListener('progress', config.onDownloadProgress)
     }
 
-    // Not all browsers support upload events
+    // 如果配置了上传事件回调，那么添加事件监听
     if (typeof config.onUploadProgress === 'function' && request.upload) {
       request.upload.addEventListener('progress', config.onUploadProgress)
     }
 
     if (config.cancelToken) {
-      // Handle cancellation
+      // 如果取消执行，那么执行取消操作
       config.cancelToken.promise.then(function onCanceled (cancel) {
         if (!request) {
           return
         }
 
+        // 取消事件
         request.abort()
+        // 调用成功方法，返回取消事件参数
         reject(cancel)
-        // Clean up request
+        // 清理 request 对象，释放内存
         request = null
       })
     }
 
+    // 如果没有 request,那么将其设置为 null
     if (requestData === undefined) {
       requestData = null
     }
 
-    // Send the request
+    // 发送 XMLHttpRequest 请求
     request.send(requestData)
   })
 }

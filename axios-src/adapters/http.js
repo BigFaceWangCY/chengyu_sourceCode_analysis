@@ -13,20 +13,20 @@ var pkg = require('./../../package.json')
 var createError = require('../core/createError')
 var enhanceError = require('../core/enhanceError')
 
-/* eslint consistent-return:0 */
 module.exports = function httpAdapter (config) {
+  // 返回一个 Promise 对象
   return new Promise(function dispatchHttpRequest (resolve, reject) {
+    // 引入配置信息
     var data = config.data
     var headers = config.headers
     var timer
 
-    // Set User-Agent (required by some servers)
-    // Only set header if it hasn't been set in config
-    // See https://github.com/axios/axios/issues/69
+    // 如果没有 user-agent 那么使用 axios user-agent
     if (!headers['User-Agent'] && !headers['user-agent']) {
       headers['User-Agent'] = 'axios/' + pkg.version
     }
 
+    // 如果 data 存在且不为 stream ，那么根据其内容统计 content-length 并传入头部中
     if (data && !utils.isStream(data)) {
       if (Buffer.isBuffer(data)) {
         // Nothing to do...
@@ -41,11 +41,10 @@ module.exports = function httpAdapter (config) {
         ))
       }
 
-      // Add Content-Length header if data exists
       headers['Content-Length'] = data.length
     }
 
-    // HTTP basic authentication
+    // 检查配置的用户信息设置，如果设置了就使用，要不然就使用空串
     var auth = undefined
     if (config.auth) {
       var username = config.auth.username || ''
@@ -53,10 +52,12 @@ module.exports = function httpAdapter (config) {
       auth = username + ':' + password
     }
 
-    // Parse url
+    // 把语法参数分解一下
     var parsed = url.parse(config.url)
+    // 如果有设置请求协议，那么使用请求设定的协议，要不然就使用 http 协议
     var protocol = parsed.protocol || 'http:'
 
+    // 如果配置里面没有配置用户信息，但是 url 配置了，那么使用 url 的用户信息
     if (!auth && parsed.auth) {
       var urlAuth = parsed.auth.split(':')
       var urlUsername = urlAuth[0] || ''
@@ -64,6 +65,7 @@ module.exports = function httpAdapter (config) {
       auth = urlUsername + ':' + urlPassword
     }
 
+    // 如果存在用户信息配置，那么删除请求头部中的 Authorization
     if (auth) {
       delete headers.Authorization
     }
@@ -71,6 +73,7 @@ module.exports = function httpAdapter (config) {
     var isHttps = protocol === 'https:'
     var agent = isHttps ? config.httpsAgent : config.httpAgent
 
+    // 具体的请求信息
     var options = {
       hostname: parsed.hostname,
       port: parsed.port,
@@ -82,6 +85,7 @@ module.exports = function httpAdapter (config) {
     }
 
     var proxy = config.proxy
+    // 如果设置了代理但未启用，那么仅修改一下代理信息
     if (!proxy && proxy !== false) {
       var proxyEnv = protocol.slice(0, -1) + '_proxy'
       var proxyUrl = process.env[proxyEnv] || process.env[proxyEnv.toUpperCase()]
@@ -102,6 +106,7 @@ module.exports = function httpAdapter (config) {
       }
     }
 
+    // 如果使用了代理，修改对应的请求信息
     if (proxy) {
       options.hostname = proxy.host
       options.host = proxy.host
@@ -109,7 +114,6 @@ module.exports = function httpAdapter (config) {
       options.port = proxy.port
       options.path = protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path
 
-      // Basic proxy authorization
       if (proxy.auth) {
         var base64 = new Buffer(proxy.auth.username + ':' + proxy.auth.password, 'utf8').toString('base64')
         options.headers['Proxy-Authorization'] = 'Basic ' + base64
@@ -117,6 +121,7 @@ module.exports = function httpAdapter (config) {
     }
 
     var transport
+    // 一般是有配置就按配置来，没有配置的话就使用默认传输方式
     if (config.transport) {
       transport = config.transport
     } else if (config.maxRedirects === 0) {
@@ -128,30 +133,25 @@ module.exports = function httpAdapter (config) {
       transport = isHttps ? httpsFollow : httpFollow
     }
 
-    // Create the request
+    // 创建一个 request
     var req = transport.request(options, function handleResponse (res) {
+      // 如果请求已终止，啥都不做，直接返回
       if (req.aborted) return
 
-      // Response has been received so kill timer that handles request timeout
       clearTimeout(timer)
       timer = null
 
-      // uncompress the response body transparently if required
+      // 清除请求头的 content-encoding 信息
       var stream = res
       switch (res.headers['content-encoding']) {
-      /* eslint default-case:0 */
         case 'gzip':
         case 'compress':
         case 'deflate':
-        // add the unzipper to the body stream processing pipeline
           stream = stream.pipe(zlib.createUnzip())
-
-          // remove the content-encoding in order to not confuse downstream operations
           delete res.headers['content-encoding']
           break
       }
 
-      // return the last request in case of redirects
       var lastRequest = res.req || req
 
       var response = {
@@ -162,6 +162,7 @@ module.exports = function httpAdapter (config) {
         request: lastRequest
       }
 
+      // 如果 responseType 是一个 stream,那么直接把它放入 settle 中，要不然，把它转化成流，进行处理
       if (config.responseType === 'stream') {
         response.data = stream
         settle(resolve, reject, response)
@@ -170,18 +171,19 @@ module.exports = function httpAdapter (config) {
         stream.on('data', function handleStreamData (chunk) {
           responseBuffer.push(chunk)
 
-          // make sure the content length is not over the maxContentLength if specified
           if (config.maxContentLength > -1 && Buffer.concat(responseBuffer).length > config.maxContentLength) {
             reject(createError('maxContentLength size of ' + config.maxContentLength + ' exceeded',
               config, null, lastRequest))
           }
         })
 
+        // 流的 error 监听处理
         stream.on('error', function handleStreamError (err) {
           if (req.aborted) return
           reject(enhanceError(err, config, null, lastRequest))
         })
 
+        // 流的 end 监听处理
         stream.on('end', function handleStreamEnd () {
           var responseData = Buffer.concat(responseBuffer)
           if (config.responseType !== 'arraybuffer') {
@@ -194,13 +196,13 @@ module.exports = function httpAdapter (config) {
       }
     })
 
-    // Handle errors
+    // 监听 error 事件，如果错误，那么终止请求，并执行 Promise 的 reject 状态回调
     req.on('error', function handleRequestError (err) {
       if (req.aborted) return
       reject(enhanceError(err, config, null, req))
     })
 
-    // Handle request timeout
+    // 设置超时，如果超时就停止
     if (config.timeout && !timer) {
       timer = setTimeout(function handleRequestTimeout () {
         req.abort()
@@ -208,8 +210,8 @@ module.exports = function httpAdapter (config) {
       }, config.timeout)
     }
 
+    // 如果配置了取消，那么根据情况调用停止信息并调用 Promise 对象的 reject 方法
     if (config.cancelToken) {
-      // Handle cancellation
       config.cancelToken.promise.then(function onCanceled (cancel) {
         if (req.aborted) return
 
@@ -218,7 +220,7 @@ module.exports = function httpAdapter (config) {
       })
     }
 
-    // Send the request
+    // 发送请求信息
     if (utils.isStream(data)) {
       data.pipe(req)
     } else {
